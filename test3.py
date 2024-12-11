@@ -33,35 +33,46 @@ def create_base_network():
     return G
 
 
-# Function to visualize the network in PyVis
-def visualize_network(G, influencers=[], clustering=None, selected_account=None):
-    # Create a PyVis Network
+def visualize_network(G, clustering=None, selected_account=None, influencers=[]):
+    # Create the PyVis Network object
     net = Network(height="750px", width="100%", directed=True)
     net.from_nx(G)
 
-    # Highlight influencers using a different node size or color
-    for node in net.nodes:
-        if node["id"] in influencers:
-            node["color"] = "red"
-            node["size"] = 20  # Larger size for influencers
-
-    # Cluster nodes visually
+    # Generate consistent cluster colors (once for all nodes)
+    cluster_colors = {}
     if clustering:
-        cluster_colors = generate_cluster_colors(len(set(clustering.values())))  # Generate unique colors for clusters
-        for node in net.nodes:
-            node_id = node["id"]  # Get the node name (ID)
-            if node_id in clustering:
-                cluster_id = clustering[node_id]
-                node["group"] = cluster_id  # Assign the cluster group
-                node["color"] = cluster_colors[cluster_id]  # Assign color to the cluster
+        unique_clusters = set(clustering.values())
+        cluster_colors = {cluster_id: color for cluster_id, color in zip(unique_clusters, generate_cluster_colors(len(unique_clusters)))}
 
-    # Highlight specific account
+    # Determine relevant nodes (followers/followed) if a user is selected
+    relevant_nodes = set()
     if selected_account:
-        for node in net.nodes:
-            if node["id"] == selected_account:
-                node["color"] = "green"
-                node["size"] = 30  # Larger size for selected node
-                break
+        relevant_nodes = set(G.successors(selected_account)) | set(G.predecessors(selected_account)) | {selected_account}
+
+    # Update node properties (clustering, selection, and emphasis)
+    for node in net.nodes:
+        node_id = node["id"]  # Stylist name or node ID
+
+        # Base cluster color assignment (for everyone in the graph)
+        if clustering and node_id in clustering:
+            cluster_id = clustering[node_id]
+            node["color"] = cluster_colors[cluster_id]
+            node["group"] = cluster_id  # Assign consistent cluster group
+
+        # Highlight nodes based on user selection
+        if selected_account:
+            if node_id in relevant_nodes:  # Highlight relevant nodes
+                if node_id == selected_account:  # Special case for selected node
+                    node["color"] = "green"  # Selected user is green
+                    node["size"] = 30  # Make the selected user larger
+                else:  # Directly connected nodes (followers or followed)
+                    node["size"] = 20  # Emphasize with larger size, but keep cluster-based color
+            else:  # Dim irrelevant nodes
+                node["color"] = "rgba(200, 200, 200, 0.2)"  # Light gray and transparent for dimmed nodes
+                node["size"] = 8
+        elif node_id in influencers:  # Highlight influencers (if no user is selected)
+            node["size"] = 20  # Emphasize influencers' size
+            # Keep their cluster color intact
 
     # Customize general appearance
     net.set_options("""
@@ -128,22 +139,58 @@ st.title("Instagram Stylist Network Analysis")
 # Create the base graph
 G = create_base_network()
 
+# # Sidebar options
+# st.sidebar.header("Options")
+# selected_node = st.sidebar.selectbox("Select an Account (Node):", ["None"] + list(stylists_data['Name']))
+# show_influencers = st.sidebar.checkbox("Highlight Key Influencers", value=True)
+# show_clustering = st.sidebar.checkbox("Show Communities (Clusters)", value=True)
+# n_clusters = st.sidebar.slider("Number of Clusters:", min_value=2, max_value=10, value=5)
+
+# # Prepare data for influencer and cluster visualizations
+# influencers = calculate_influencers(G) if show_influencers else []
+# clustering = cluster_nodes(G, n_clusters=n_clusters) if show_clustering else None
+
+# # Display network graph
+# if selected_node == "None":
+#     selected_node = None  # Reset selected node to None if no account selected
+
+# net = visualize_network(G, influencers=influencers, clustering=clustering, selected_account=selected_node)
+# net.save_graph("pyvis_network.html")
+# st.components.v1.html(open("pyvis_network.html", "r").read(), height=800)
+
+
+
+# # Display account details (if a node is selected)
+# if selected_node:
+#     st.sidebar.subheader("Account Details")
+#     account_data = stylists_data[stylists_data['Name'] == selected_node].iloc[0]
+#     st.sidebar.write(f"**Name:** {account_data['Name']}")
+#     st.sidebar.write(f"**Salon:** {account_data['Salon Name']}")
+#     st.sidebar.write(f"**Followers:** {account_data['Followers']}")
+#     st.sidebar.write(f"**Most Popular Post:** {account_data['Most Popular Post Text']}")
+#     st.sidebar.write(f"**Likes:** {account_data['Likes']}")
+
+# # Display community clustering summary
+# if show_clustering and clustering:
+#     st.subheader("Community Clustering Summary")
+#     cluster_counts = pd.Series(list(clustering.values())).value_counts()
+#     for cluster, count in cluster_counts.items():
+#         st.write(f"Cluster {cluster}: {count} nodes")
+
 # Sidebar options
 st.sidebar.header("Options")
 selected_node = st.sidebar.selectbox("Select an Account (Node):", ["None"] + list(stylists_data['Name']))
 show_influencers = st.sidebar.checkbox("Highlight Key Influencers", value=True)
-show_clustering = st.sidebar.checkbox("Show Communities (Clusters)", value=True)
 n_clusters = st.sidebar.slider("Number of Clusters:", min_value=2, max_value=10, value=5)
 
-# Prepare data for influencer and cluster visualizations
-influencers = calculate_influencers(G) if show_influencers else []
-clustering = cluster_nodes(G, n_clusters=n_clusters) if show_clustering else None
+# Perform clustering once for the entire graph
+clustering = cluster_nodes(G, n_clusters=n_clusters)
 
 # Display network graph
 if selected_node == "None":
-    selected_node = None  # Reset selected node to None if no account selected
+    selected_node = None  # Reset selected node if None is selected
 
-net = visualize_network(G, influencers=influencers, clustering=clustering, selected_account=selected_node)
+net = visualize_network(G, clustering=clustering, selected_account=selected_node, influencers=calculate_influencers(G) if show_influencers else [])
 net.save_graph("pyvis_network.html")
 st.components.v1.html(open("pyvis_network.html", "r").read(), height=800)
 
@@ -158,8 +205,7 @@ if selected_node:
     st.sidebar.write(f"**Likes:** {account_data['Likes']}")
 
 # Display community clustering summary
-if show_clustering and clustering:
-    st.subheader("Community Clustering Summary")
-    cluster_counts = pd.Series(list(clustering.values())).value_counts()
-    for cluster, count in cluster_counts.items():
-        st.write(f"Cluster {cluster}: {count} nodes")
+st.subheader("Community Clustering Summary")
+cluster_counts = pd.Series(list(clustering.values())).value_counts()
+for cluster, count in cluster_counts.items():
+    st.write(f"Cluster {cluster}: {count} nodes")
